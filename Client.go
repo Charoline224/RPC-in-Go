@@ -36,8 +36,34 @@ type Client struct {
 	close bool
 }
 
-func NewClient(conn io.ReadWriteCloser) {
+// 同步
+func (cli *Client) SyncReq(sm string, args interface{}) (interface{}, error) {
+	call := cli.AsynReq(sm, args)
+	c := <-call.Done
+	return c.resp, c.err
+}
 
+// 异步
+func (cli *Client) AsynReq(sm string, args interface{}) *Call {
+	//构造请求
+	var call Call
+	call.Done = make(chan *Call, 1)
+	call.ServiceMethod = sm
+	call.args = args
+	cli.Send(&call)
+	return &call
+}
+
+func NewClient(conn io.ReadWriteCloser, t Codec.Type) *Client {
+	var c Client
+	c.conn = conn
+	c.codec = Codec.NewCodecFuncMap[t](conn)
+	c.cnt = 0
+	c.calls = make(map[uint64]*Call)
+	c.err = nil
+	c.close = false
+	go c.Receive()
+	return &c
 }
 
 // 关闭client
