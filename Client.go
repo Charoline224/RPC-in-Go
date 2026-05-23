@@ -54,8 +54,9 @@ func (cli *Client) AsynReq(sm string, args interface{}) *Call {
 	return &call
 }
 
-func NewClient(conn io.ReadWriteCloser, t Codec.Type) *Client {
+func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
 	var c Client
+	t := o.CodecType
 	c.conn = conn
 	c.codec = Codec.NewCodecFuncMap[t](conn)
 	c.cnt = 0

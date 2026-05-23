@@ -43,3 +43,25 @@ A:想想这个场景：
 
 发送方：发完信号之后需要等待吗？还是发完就走？
 接收方：什么时候来取？会不会比发送方慢？
+
+
+
+Server 注册方法的时候，已经通过反射知道了参数类型（ArgType）
+客户端发来字节流
+Server 用 reflect.New(ArgType) 创建一个空的该类型实例
+把字节流解码填充进这个实例
+
+所以不是从字节流猜类型，而是已经知道类型，用类型来解码字节流。
+
+
+
+method.Func.Call([]reflect.Value{receiver, args, reply})
+receiver 是服务实例（MathService 的实例）
+args 是参数
+reply 是返回值指针
+
+
+
+反射得到的结果是一个容器，不能直接作为interface参数传入。
+如果你直接传 res（reflect.Value），gob.Encoder 收到的是一个 reflect.Value 对象，它会把 reflect.Value 这个结构体本身编码，而不是里面包装的实际值！
+res.Interface() 把 reflect.Value 里包装的实际值取出来，这样编码的才是真正的数据。
