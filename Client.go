@@ -1,7 +1,8 @@
-package rpcingo
+package main
 
 import (
 	"RPCinGo/Codec"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -37,24 +38,26 @@ type Client struct {
 }
 
 // 同步
-func (cli *Client) SyncReq(sm string, args interface{}) (interface{}, error) {
-	call := cli.AsynReq(sm, args)
+func (cli *Client) SyncReq(sm string, args interface{}, res interface{}) error {
+	call := cli.AsynReq(sm, args, res)
 	c := <-call.Done
-	return c.resp, c.err
+	return c.err
 }
 
 // 异步
-func (cli *Client) AsynReq(sm string, args interface{}) *Call {
+func (cli *Client) AsynReq(sm string, args interface{}, res interface{}) *Call {
 	//构造请求
 	var call Call
 	call.Done = make(chan *Call, 1)
 	call.ServiceMethod = sm
 	call.args = args
+	call.resp = res
 	cli.Send(&call)
 	return &call
 }
 
 func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
+	json.NewEncoder(conn).Encode(o)
 	var c Client
 	t := o.CodecType
 	c.conn = conn
@@ -94,6 +97,7 @@ func (cli *Client) Send(call *Call) error {
 	//写header和body（参数struct）
 	var header Codec.Header
 	header.Num = atomic.AddUint64(&cli.cnt, 1)
+	header.ServiceMethod = call.ServiceMethod
 	call.num = header.Num
 	cli.lock.Lock()
 	defer cli.lock.Unlock()
@@ -129,7 +133,7 @@ func (cli *Client) Receive() error {
 			call.Done <- call
 			continue
 		}
-		err = cli.codec.ReadBody(&call.resp)
+		err = cli.codec.ReadBody(call.resp)
 		if err != nil {
 			call.err = err
 			call.Done <- call

@@ -65,3 +65,12 @@ reply 是返回值指针
 反射得到的结果是一个容器，不能直接作为interface参数传入。
 如果你直接传 res（reflect.Value），gob.Encoder 收到的是一个 reflect.Value 对象，它会把 reflect.Value 这个结构体本身编码，而不是里面包装的实际值！
 res.Interface() 把 reflect.Value 里包装的实际值取出来，这样编码的才是真正的数据。
+
+
+报错：
+gob: local interface type *interface {} can only be decoded from remote interface type; received concrete type int
+<nil>
+原因：
+gob不知道解析成什么类型。
+解决：
+调用时传入一个固定类型的指针用于写回复

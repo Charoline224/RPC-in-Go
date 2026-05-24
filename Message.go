@@ -1,4 +1,4 @@
-package rpcingo
+package main
 
 import "RPCinGo/Codec"
 

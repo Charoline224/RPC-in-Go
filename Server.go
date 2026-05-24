@@ -1,4 +1,4 @@
-package rpcingo
+package main
 
 import (
 	"RPCinGo/Codec"
@@ -25,6 +25,12 @@ type Server struct {
 	err        error
 }
 
+func NewServer() *Server {
+	var s Server
+	s.methodsMap = make(map[string]Method)
+	return &s
+}
+
 func (s *Server) Register(service interface{}) error {
 	t := reflect.TypeOf(service)
 	s.lock.Lock()
@@ -41,6 +47,7 @@ func (s *Server) Register(service interface{}) error {
 		m.Service = reflect.ValueOf(service)
 		s.methodsMap[method.Name] = m
 	}
+	fmt.Println("registered methods:", s.methodsMap)
 	return nil
 }
 func (s *Server) Listen(port string) error {
@@ -81,6 +88,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 			return err
 		}
 		methName := header.ServiceMethod
+		fmt.Println("looking for method:", header.ServiceMethod)
 		s.lock.RLock()
 		method, ok := s.methodsMap[methName]
 		s.lock.RUnlock()
@@ -92,7 +100,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 			continue
 		}
 
-		res := reflect.New(method.ResType)
+		res := reflect.New(method.ResType.Elem())
 		service := method.Service
 		args := reflect.New(method.ArgsType)
 
@@ -106,7 +114,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 		}
 
 		go func(header Codec.Header, method Method, service reflect.Value, args, res reflect.Value) {
-			returnVals := method.Func.Call([]reflect.Value{service, args, res})
+			returnVals := method.Func.Call([]reflect.Value{service, args.Elem(), res})
 			err, ok := returnVals[0].Interface().(error) //类型断言
 			if ok && err != nil {
 				header.Error = err.Error()
