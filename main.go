@@ -31,7 +31,7 @@ func main() {
 	client := NewClient(conn, DefaultOption)
 	//客户端发请求
 	var resp int
-	err = client.SyncReq("Add", Args{A: 1, B: 2}, &resp)
+	err = client.Req("Add", Args{A: 1, B: 2}, &resp)
 	if err != nil {
 		fmt.Println(err)
 	}

@@ -38,14 +38,14 @@ type Client struct {
 }
 
 // 同步
-func (cli *Client) SyncReq(sm string, args interface{}, res interface{}) error {
-	call := cli.AsynReq(sm, args, res)
+func (cli *Client) Req(sm string, args interface{}, res interface{}) error {
+	call := cli.Call(sm, args, res)
 	c := <-call.Done
 	return c.err
 }
 
 // 异步
-func (cli *Client) AsynReq(sm string, args interface{}, res interface{}) *Call {
+func (cli *Client) Call(sm string, args interface{}, res interface{}) *Call {
 	//构造请求
 	var call Call
 	call.Done = make(chan *Call, 1)
