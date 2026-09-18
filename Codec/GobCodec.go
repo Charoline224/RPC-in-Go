@@ -30,18 +30,21 @@ func (c *GobCodec) ReadHeader(h *Header) error {
 func (c *GobCodec) ReadBody(body interface{}) error {
 	return c.dec.Decode(body)
 }
-func (c *GobCodec) Write(body interface{}, h *Header) error {
+func (c *GobCodec) Write(body interface{}, h *Header) (err error) {
 	c.base.lock.Lock()
 	defer c.base.lock.Unlock()
 	defer func() {
 		//把buf里面的缓冲字节写到conn
-		err := c.base.buf.Flush()
-		if err != nil {
+		flushErr := c.base.buf.Flush()
+		if flushErr != nil {
 			c.Close()
+			if err == nil {
+				err = flushErr
+			}
 		}
 	}()
 	//编码head，写到buf
-	err := c.enc.Encode(h)
+	err = c.enc.Encode(h)
 	if err != nil {
 		log.Println("rpc codec: gob error encoding header:", err)
 		return err

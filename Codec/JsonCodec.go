@@ -30,18 +30,26 @@ func (c *JsonCodec) ReadHeader(h *Header) error {
 	return c.dec.Decode(h)
 }
 func (c *JsonCodec) ReadBody(body interface{}) error {
+	if body == nil {
+		//JSON的Decode(nil)空body会报错
+		var discard json.RawMessage
+		return c.dec.Decode(&discard)
+	}
 	return c.dec.Decode(body)
 }
-func (c *JsonCodec) Write(body interface{}, h *Header) error {
+func (c *JsonCodec) Write(body interface{}, h *Header) (err error) {
 	c.base.lock.Lock()
 	defer c.base.lock.Unlock()
 	defer func() {
-		err := c.base.buf.Flush()
-		if err != nil {
+		flushErr := c.base.buf.Flush()
+		if flushErr != nil {
 			c.Close()
+			if err == nil {
+				err = flushErr
+			}
 		}
 	}()
-	err := c.enc.Encode(h)
+	err = c.enc.Encode(h)
 	if err != nil {
 		log.Println("rpc codec: json error encoding header:", err)
 		return err

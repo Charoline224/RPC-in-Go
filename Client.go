@@ -40,7 +40,7 @@ type Client struct {
 }
 
 func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
-	json.NewEncoder(conn).Encode(o)
+	err := json.NewEncoder(conn).Encode(o)
 	var c Client
 	t := o.CodecType
 	c.conn = conn
@@ -49,6 +49,10 @@ func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
 	c.calls = make(map[uint64]*Call)
 	c.err = nil
 	c.close = false
+	if err != nil {
+		c.terminate(err)
+		return &c
+	}
 	go c.Receive()
 	return &c
 }
@@ -61,9 +65,6 @@ func (cli *Client) Req(name string, args any, res interface{}) error {
 	}
 	//阻塞在此处，等待管道返回已经done的call
 	<-call.Done
-	cli.lock.Lock()
-	delete(cli.calls, call.num)
-	cli.lock.Unlock()
 	fmt.Println("call done, err:", call.err)
 	return call.err
 }
@@ -83,26 +84,41 @@ func (cli *Client) Call(sm string, args interface{}, res interface{}) (*Call, er
 	return &call, nil
 }
 
-// 关闭client
+// 正常关闭client
 func (cli *Client) Close() error {
+	cli.terminate(errors.New("client is closed"))
+	return nil
+}
+
+// 修改状态：从待处理表移除call，即取得该 Call 的独占完成权。
+func (cli *Client) takeCall(num uint64) *Call {
+	call := cli.calls[num]
+	delete(cli.calls, num)
+	return call
+}
+
+// 只结束一个call。错误出现时候，打破死锁的设计。
+// 死锁在于：send不return就req就无法进行到接收，管道堵塞；但是req管道没有接收，send的管道就堵塞，无法到达return。
+func (call *Call) finish(err error) {
+	call.err = err
+	close(call.Done) // 不要求调用者正在接收，也允许稍后等待。
+}
+
+// 结束一个client。任何终止，可能由错误引起
+func (cli *Client) terminate(err error) {
 	cli.lock.Lock()
-	defer cli.lock.Unlock()
 	if cli.close {
-		return cli.err
-	}
-	err := cli.conn.Close()
-	if err != nil {
-		return err
+		cli.lock.Unlock()
+		return
 	}
 	cli.close = true
-	cli.err = errors.New("client is closed")
-	//call未处理完，但是关闭client了,剩下的call要全部终结
-	for _, call := range cli.calls {
-		call.err = cli.err
-		call.Done <- struct{}{}
+	cli.err = err
+	for num := range cli.calls {
+		cli.takeCall(num).finish(err)
 	}
-
-	return nil
+	cli.lock.Unlock()
+	// 唤醒正在读响应体或发送请求的 goroutine；不持状态锁做网络操作。
+	cli.conn.Close()
 }
 func (cli *Client) Send(call *Call) error {
 	if call == nil {
@@ -113,16 +129,21 @@ func (cli *Client) Send(call *Call) error {
 	header.Num = atomic.AddUint64(&cli.cnt, 1)
 	header.ServiceMethod = call.ServiceMethod
 	call.num = header.Num
+
 	cli.lock.Lock()
-	defer cli.lock.Unlock()
+	//如果cli已经关闭了
+	if cli.close {
+		err := cli.err
+		cli.lock.Unlock()
+		call.finish(err)
+		return err
+	}
 	cli.calls[call.num] = call //加入请求队列
+	cli.lock.Unlock()
 	//编码message
 	err := cli.codec.Write(call.args, &header)
 	if err != nil {
-		call.err = err
-		call.Done <- struct{}{}
-		delete(cli.calls, call.num)
-		cli.err = err
+		cli.terminate(err)
 		return err
 	}
 	fmt.Println("send request:", call.ServiceMethod, "num:", call.num)
@@ -134,32 +155,40 @@ func (cli *Client) Receive() error {
 		var header Codec.Header
 		err := cli.codec.ReadHeader(&header)
 		if err != nil {
-			cli.err = err
+			cli.terminate(err)
 			return err
 		}
 		fmt.Println("receive response:", header.ServiceMethod, "num:", header.Num)
 		num := header.Num
+		//找到call对象 + 修改状态（从待处理表中移除call）
 		cli.lock.Lock()
-		call := cli.calls[num]
+		call := cli.takeCall(num)
 		cli.lock.Unlock()
 		if call == nil {
-			cli.codec.ReadBody(nil)
+			if err := cli.codec.ReadBody(nil); err != nil {
+				cli.terminate(err)
+				return err
+			}
 			continue
 		}
+		//解析错误
 		parseError := header.Error
 		if parseError != "" {
-			call.err = errors.New(parseError)
-			cli.codec.ReadBody(nil)
-			call.Done <- struct{}{}
+			err := cli.codec.ReadBody(nil)
+			call.finish(errors.New(parseError))
+			if err != nil {
+				cli.terminate(err)
+				return err
+			}
 			continue
 		}
 		err = cli.codec.ReadBody(call.resp)
 		if err != nil {
-			call.err = err
-			call.Done <- struct{}{}
-			continue
+			call.finish(err)
+			cli.terminate(err)
+			return err
 		}
-		call.Done <- struct{}{}
+		call.finish(nil)
 
 	}
 }
