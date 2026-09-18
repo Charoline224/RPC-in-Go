@@ -2,6 +2,7 @@ package Codec
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 )
@@ -25,12 +26,15 @@ func (c *JsonCodec) Close() error {
 	return c.base.conn.Close()
 }
 func (c *JsonCodec) ReadHeader(h *Header) error {
+	fmt.Println("json codec read header")
 	return c.dec.Decode(h)
 }
 func (c *JsonCodec) ReadBody(body interface{}) error {
 	return c.dec.Decode(body)
 }
 func (c *JsonCodec) Write(body interface{}, h *Header) error {
+	c.base.lock.Lock()
+	defer c.base.lock.Unlock()
 	defer func() {
 		err := c.base.buf.Flush()
 		if err != nil {

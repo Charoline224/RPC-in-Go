@@ -31,17 +31,22 @@ func (c *GobCodec) ReadBody(body interface{}) error {
 	return c.dec.Decode(body)
 }
 func (c *GobCodec) Write(body interface{}, h *Header) error {
+	c.base.lock.Lock()
+	defer c.base.lock.Unlock()
 	defer func() {
+		//把buf里面的缓冲字节写到conn
 		err := c.base.buf.Flush()
 		if err != nil {
 			c.Close()
 		}
 	}()
+	//编码head，写到buf
 	err := c.enc.Encode(h)
 	if err != nil {
 		log.Println("rpc codec: gob error encoding header:", err)
 		return err
 	}
+	//编码body，写到buf
 	err = c.enc.Encode(body)
 	if err != nil {
 		log.Println("rpc codec: gob error encoding body:", err)

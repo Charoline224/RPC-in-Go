@@ -4,18 +4,20 @@ import (
 	"RPCinGo/Codec"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
 )
 
 // 请求：
+// call持有管道是为了定向通知结果
 type Call struct {
 	num           uint64
 	ServiceMethod string
 	args          interface{}
 	resp          interface{}
-	Done          chan *Call
+	Done          chan struct{}
 	err           error
 }
 
@@ -37,25 +39,6 @@ type Client struct {
 	close bool
 }
 
-// 同步
-func (cli *Client) Req(sm string, args interface{}, res interface{}) error {
-	call := cli.Call(sm, args, res)
-	c := <-call.Done
-	return c.err
-}
-
-// 异步
-func (cli *Client) Call(sm string, args interface{}, res interface{}) *Call {
-	//构造请求
-	var call Call
-	call.Done = make(chan *Call, 1)
-	call.ServiceMethod = sm
-	call.args = args
-	call.resp = res
-	cli.Send(&call)
-	return &call
-}
-
 func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
 	json.NewEncoder(conn).Encode(o)
 	var c Client
@@ -68,6 +51,36 @@ func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
 	c.close = false
 	go c.Receive()
 	return &c
+}
+
+// 同步
+func (cli *Client) Req(name string, args any, res interface{}) error {
+	call, err := cli.Call(name, args, res)
+	if err != nil {
+		return err
+	}
+	//阻塞在此处，等待管道返回已经done的call
+	<-call.Done
+	cli.lock.Lock()
+	delete(cli.calls, call.num)
+	cli.lock.Unlock()
+	fmt.Println("call done, err:", call.err)
+	return call.err
+}
+
+// 异步调用
+func (cli *Client) Call(sm string, args interface{}, res interface{}) (*Call, error) {
+	//构造请求
+	var call Call
+	call.Done = make(chan struct{})
+	call.ServiceMethod = sm
+	call.args = args
+	call.resp = res
+	err := cli.Send(&call)
+	if err != nil {
+		return nil, err
+	}
+	return &call, nil
 }
 
 // 关闭client
@@ -86,8 +99,9 @@ func (cli *Client) Close() error {
 	//call未处理完，但是关闭client了,剩下的call要全部终结
 	for _, call := range cli.calls {
 		call.err = cli.err
-		call.Done <- call
+		call.Done <- struct{}{}
 	}
+
 	return nil
 }
 func (cli *Client) Send(call *Call) error {
@@ -102,17 +116,20 @@ func (cli *Client) Send(call *Call) error {
 	cli.lock.Lock()
 	defer cli.lock.Unlock()
 	cli.calls[call.num] = call //加入请求队列
+	//编码message
 	err := cli.codec.Write(call.args, &header)
 	if err != nil {
 		call.err = err
-		call.Done <- call
+		call.Done <- struct{}{}
 		delete(cli.calls, call.num)
 		cli.err = err
 		return err
 	}
+	fmt.Println("send request:", call.ServiceMethod, "num:", call.num)
 	return nil
 }
 func (cli *Client) Receive() error {
+	fmt.Println("client start receiving")
 	for {
 		var header Codec.Header
 		err := cli.codec.ReadHeader(&header)
@@ -120,8 +137,11 @@ func (cli *Client) Receive() error {
 			cli.err = err
 			return err
 		}
+		fmt.Println("receive response:", header.ServiceMethod, "num:", header.Num)
 		num := header.Num
+		cli.lock.Lock()
 		call := cli.calls[num]
+		cli.lock.Unlock()
 		if call == nil {
 			cli.codec.ReadBody(nil)
 			continue
@@ -130,15 +150,16 @@ func (cli *Client) Receive() error {
 		if parseError != "" {
 			call.err = errors.New(parseError)
 			cli.codec.ReadBody(nil)
-			call.Done <- call
+			call.Done <- struct{}{}
 			continue
 		}
 		err = cli.codec.ReadBody(call.resp)
 		if err != nil {
 			call.err = err
-			call.Done <- call
+			call.Done <- struct{}{}
 			continue
 		}
-		call.Done <- call
+		call.Done <- struct{}{}
+
 	}
 }

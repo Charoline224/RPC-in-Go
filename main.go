@@ -19,22 +19,34 @@ func main() {
 	server := NewServer()
 	//注册服务
 	var m MathService
-	server.Register(&m)
+	err := server.Register(&m)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	//开始监听
-	go server.Listen(":8080")
+	err = server.Listen(":18080")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	go server.Serve()
 	//建立客户端
 	time.Sleep(time.Second)
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", ":18080")
 	if err != nil {
 		return
 	}
 	client := NewClient(conn, DefaultOption)
+	time.Sleep(time.Second * 3)
 	//客户端发请求
-	var resp int
+	var resp any
 	err = client.Req("Add", Args{A: 1, B: 2}, &resp)
 	if err != nil {
 		fmt.Println(err)
 	}
 	fmt.Println(resp)
 	client.Close()
+	server.Close()
 }

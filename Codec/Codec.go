@@ -3,6 +3,7 @@ package Codec
 import (
 	"bufio"
 	"io"
+	"sync"
 )
 
 // header结构体
@@ -17,10 +18,12 @@ type Header struct {
 type BaseCodec struct {
 	conn io.ReadWriteCloser
 	buf  *bufio.Writer
+	lock *sync.Mutex
 }
 
 func NewBaseCodec(conn io.ReadWriteCloser) *BaseCodec {
 	var b BaseCodec
+	b.lock = new(sync.Mutex)
 	b.buf = bufio.NewWriter(conn)
 	b.conn = conn
 	return &b
@@ -47,6 +50,7 @@ type NewCodecFunc func(io.ReadWriteCloser) Codec
 
 var NewCodecFuncMap = make(map[Type]NewCodecFunc)
 
+// 自动注册
 func init() {
 	NewCodecFuncMap[GobType] = NewGobCodec
 	NewCodecFuncMap[JsonType] = NewJsonCodec
