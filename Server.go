@@ -135,6 +135,9 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 		method, ok := s.methodsMap[methName]
 		s.lock.RUnlock()
 		if !ok {
+			if err := codec.ReadBody(nil); err != nil {
+				return err
+			}
 			header.Error = fmt.Sprintf("method %s not found", methName)
 			codec.Write(nil, &header)
 			continue
