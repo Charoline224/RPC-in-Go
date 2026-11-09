@@ -8,10 +8,11 @@ import (
 
 // header结构体
 type Header struct {
-	Num           uint64
-	ServiceMethod string
-	Length        int
-	Error         string
+	Num     uint64
+	Service string
+	Method  string
+	Length  int
+	Error   string
 }
 
 // Codec的结构体公共部分

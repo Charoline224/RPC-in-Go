@@ -12,16 +12,22 @@ import (
 	"sync"
 )
 
+type Service struct {
+	Name    string
+	typ     reflect.Type
+	rcvr    reflect.Value
+	Methods map[string]Method
+}
+
 type Method struct {
 	Func     reflect.Value
 	ArgsType reflect.Type
 	ResType  reflect.Type
-	Service  reflect.Value
 }
 
 type Server struct {
 	listener   net.Listener
-	methodsMap map[string]Method
+	serviceMap map[string]Service
 	lock       sync.RWMutex
 	close      bool
 	err        error
@@ -32,14 +38,20 @@ func NewServer() *Server {
 	var s Server
 	s.lock = sync.RWMutex{}
 	s.wg = sync.WaitGroup{}
-	s.methodsMap = make(map[string]Method)
+	s.serviceMap = make(map[string]Service)
 	return &s
 }
 
+// 应该注册service而不是method
 func (s *Server) Register(service interface{}) error {
-	t := reflect.TypeOf(service)
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	var srv Service
+	srv.Methods = make(map[string]Method)
+	t := reflect.TypeOf(service)
+	srv.typ = t
+	srv.Name = t.Elem().Name()
+	srv.rcvr = reflect.ValueOf(service)
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
 		if method.Type.NumIn() != 3 || method.Type.NumOut() != 1 || method.Type.Out(0) != reflect.TypeOf((*error)(nil)).Elem() {
@@ -49,10 +61,9 @@ func (s *Server) Register(service interface{}) error {
 		m.Func = method.Func
 		m.ArgsType = method.Type.In(1)
 		m.ResType = method.Type.In(2)
-		m.Service = reflect.ValueOf(service)
-		s.methodsMap[method.Name] = m
+		srv.Methods[method.Name] = m
 	}
-	fmt.Println("registered methods:", s.methodsMap)
+	s.serviceMap[srv.Name] = srv
 	return nil
 }
 func (s *Server) Listen(port string) error {
@@ -129,10 +140,21 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 			continue
 		}
 		//获取方法名->查找方法method,获取一堆调用需要的参数
-		methName := header.ServiceMethod
-		fmt.Println("looking for method:", header.ServiceMethod)
+		srvName := header.Service
 		s.lock.RLock()
-		method, ok := s.methodsMap[methName]
+		srv, ok := s.serviceMap[srvName]
+		s.lock.RUnlock()
+		if !ok {
+			if err := codec.ReadBody(nil); err != nil {
+				return err
+			}
+			header.Error = fmt.Sprintf("service %s not found", srvName)
+			codec.Write(nil, &header)
+			continue
+		}
+		methName := header.Method
+		s.lock.RLock()
+		method, ok := srv.Methods[methName]
 		s.lock.RUnlock()
 		if !ok {
 			if err := codec.ReadBody(nil); err != nil {
@@ -142,7 +164,6 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 			codec.Write(nil, &header)
 			continue
 		}
-		service := method.Service
 		res := reflect.New(method.ResType.Elem())
 		args := reflect.New(method.ArgsType)
 		err = codec.ReadBody(args.Interface())
@@ -163,7 +184,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 				return
 			}
 			codec.Write(res.Interface(), &header)
-		}(header, method, service, args, res)
+		}(header, method, srv.rcvr, args, res)
 
 	}
 }

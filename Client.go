@@ -13,12 +13,13 @@ import (
 // 请求：
 // call持有管道是为了定向通知结果
 type Call struct {
-	num           uint64
-	ServiceMethod string
-	args          interface{}
-	resp          interface{}
-	Done          chan struct{}
-	err           error
+	num     uint64
+	service string
+	method  string
+	args    interface{}
+	resp    interface{}
+	Done    chan struct{}
+	err     error
 }
 
 //不需要resp结构体，直接返回函数调用结果就行了
@@ -58,8 +59,8 @@ func NewClient(conn io.ReadWriteCloser, o *Option) *Client {
 }
 
 // 同步
-func (cli *Client) Req(name string, args any, res interface{}) error {
-	call, err := cli.Call(name, args, res)
+func (cli *Client) Req(service string, method string, args any, res interface{}) error {
+	call, err := cli.Call(service, method, args, res)
 	if err != nil {
 		return err
 	}
@@ -70,11 +71,12 @@ func (cli *Client) Req(name string, args any, res interface{}) error {
 }
 
 // 异步调用
-func (cli *Client) Call(sm string, args interface{}, res interface{}) (*Call, error) {
+func (cli *Client) Call(service string, method string, args interface{}, res interface{}) (*Call, error) {
 	//构造请求
 	var call Call
 	call.Done = make(chan struct{})
-	call.ServiceMethod = sm
+	call.service = service
+	call.method = method
 	call.args = args
 	call.resp = res
 	err := cli.Send(&call)
@@ -127,7 +129,8 @@ func (cli *Client) Send(call *Call) error {
 	//写header和body（参数struct）
 	var header Codec.Header
 	header.Num = atomic.AddUint64(&cli.cnt, 1)
-	header.ServiceMethod = call.ServiceMethod
+	header.Service = call.service
+	header.Method = call.method
 	call.num = header.Num
 
 	cli.lock.Lock()
@@ -146,11 +149,9 @@ func (cli *Client) Send(call *Call) error {
 		cli.terminate(err)
 		return err
 	}
-	fmt.Println("send request:", call.ServiceMethod, "num:", call.num)
 	return nil
 }
 func (cli *Client) Receive() error {
-	fmt.Println("client start receiving")
 	for {
 		var header Codec.Header
 		err := cli.codec.ReadHeader(&header)
@@ -158,9 +159,8 @@ func (cli *Client) Receive() error {
 			cli.terminate(err)
 			return err
 		}
-		fmt.Println("receive response:", header.ServiceMethod, "num:", header.Num)
 		num := header.Num
-		//找到call对象 + 修改状态（从待处理表中移除call）
+		//找到call对象 + 修改状态
 		cli.lock.Lock()
 		call := cli.takeCall(num)
 		cli.lock.Unlock()
