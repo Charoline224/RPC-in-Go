@@ -49,12 +49,32 @@ func (s *Server) Register(service interface{}) error {
 	var srv Service
 	srv.Methods = make(map[string]Method)
 	t := reflect.TypeOf(service)
+	if t == nil || t.Kind() != reflect.Ptr {
+		s.err = errors.New("service must be a non-nil pointer")
+		return s.err
+	}
 	srv.typ = t
 	srv.Name = t.Elem().Name()
+	if srv.Name == "" {
+		s.err = errors.New("service must have a named type")
+		return s.err
+	}
+	_, ok := s.serviceMap[srv.Name]
+	if ok {
+		s.err = errors.New("repeat register")
+		return s.err
+	}
 	srv.rcvr = reflect.ValueOf(service)
+	if srv.rcvr.IsNil() {
+		s.err = errors.New("service pointer cannot be nil")
+		return s.err
+	}
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
-		if method.Type.NumIn() != 3 || method.Type.NumOut() != 1 || method.Type.Out(0) != reflect.TypeOf((*error)(nil)).Elem() {
+		if method.Type.NumIn() != 3 ||
+			method.Type.NumOut() != 1 ||
+			method.Type.Out(0) != reflect.TypeOf((*error)(nil)).Elem() ||
+			method.Type.In(2).Kind() != reflect.Ptr {
 			continue
 		}
 		var m Method
@@ -124,7 +144,6 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) error {
 	}{reader, conn, conn})
 	//循环读请求
 	for {
-		fmt.Println("server start reading request")
 		var header Codec.Header
 		err := codec.ReadHeader(&header)
 		if err != nil {

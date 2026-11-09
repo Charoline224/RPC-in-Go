@@ -37,7 +37,7 @@ func TestRPCJSONRoundTrip(t *testing.T) {
 	})
 
 	var got int
-	if err := client.Req("Add", Args{A: 1, B: 2}, &got); err != nil {
+	if err := client.Req("MathService", "Add", Args{A: 1, B: 2}, &got); err != nil {
 		t.Fatalf("call Add: %v", err)
 	}
 	if got != 3 {
@@ -79,8 +79,9 @@ func TestUnknownMethodConsumesRequestBody(t *testing.T) {
 	firstWrite := make(chan error, 1)
 	go func() {
 		firstWrite <- codec.Write(Args{A: 1, B: 2}, &Codec.Header{
-			Num:           1,
-			ServiceMethod: "Missing",
+			Num:     1,
+			Service: "MathService",
+			Method:  "Missing",
 		})
 	}()
 	var first Codec.Header
@@ -100,8 +101,9 @@ func TestUnknownMethodConsumesRequestBody(t *testing.T) {
 	secondWrite := make(chan error, 1)
 	go func() {
 		secondWrite <- codec.Write(Args{A: 3, B: 4}, &Codec.Header{
-			Num:           2,
-			ServiceMethod: "Add",
+			Num:     2,
+			Service: "MathService",
+			Method:  "Add",
 		})
 	}()
 	var second Codec.Header

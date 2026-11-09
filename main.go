@@ -42,7 +42,7 @@ func main() {
 	time.Sleep(time.Second * 3)
 	//客户端发请求
 	var resp any
-	err = client.Req("Add", Args{A: 1, B: 2}, &resp)
+	err = client.Req("MathService", "Add", Args{A: 1, B: 2}, &resp)
 	if err != nil {
 		fmt.Println(err)
 	}

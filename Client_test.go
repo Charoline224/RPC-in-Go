@@ -48,11 +48,11 @@ func TestAsyncCompletion(t *testing.T) {
 		remote.Close()
 	}()
 	var results [2]int
-	first, err := cli.Call("Add", Args{1, 2}, &results[0])
+	first, err := cli.Call("MathService", "Add", Args{1, 2}, &results[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := cli.Call("Add", Args{3, 4}, &results[1])
+	second, err := cli.Call("MathService", "Add", Args{3, 4}, &results[1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestDisconnectAndClose(t *testing.T) {
 		cli, remote, stopped := testClient(t)
 		go io.Copy(io.Discard, remote)
 		var result int
-		call, err := cli.Call("Add", Args{1, 2}, &result)
+		call, err := cli.Call("MathService", "Add", Args{1, 2}, &result)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestDisconnectAndClose(t *testing.T) {
 		if call.err == nil || len(cli.calls) != 0 {
 			t.Fatal("pending call not failed and removed")
 		}
-		if _, err := cli.Call("Add", Args{}, &result); err == nil {
+		if _, err := cli.Call("MathService", "Add", Args{}, &result); err == nil {
 			t.Fatal("closed client accepted call")
 		}
 	}
@@ -106,7 +106,7 @@ func TestSendFailure(t *testing.T) {
 	remote.Close()
 	cli := &Client{conn: local, codec: Codec.NewJsonCodec(local), calls: make(map[uint64]*Call)}
 	t.Cleanup(func() { cli.Close() })
-	call := &Call{ServiceMethod: "Add", args: Args{}, Done: make(chan struct{})}
+	call := &Call{service: "MathService", method: "Add", args: Args{}, Done: make(chan struct{})}
 	if err := cli.Send(call); err == nil {
 		t.Fatal("write failure was lost")
 	}
