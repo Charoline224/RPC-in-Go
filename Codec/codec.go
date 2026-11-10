@@ -1,7 +1,6 @@
 package Codec
 
 import (
-	"bufio"
 	"io"
 	"sync"
 )
@@ -17,26 +16,19 @@ type Header struct {
 
 // Codec的结构体公共部分
 type BaseCodec struct {
-	conn io.ReadWriteCloser
-	buf  *bufio.Writer
 	lock *sync.Mutex
 }
 
-func NewBaseCodec(conn io.ReadWriteCloser) *BaseCodec {
+func NewBaseCodec() *BaseCodec {
 	var b BaseCodec
 	b.lock = new(sync.Mutex)
-	b.buf = bufio.NewWriter(conn)
-	b.conn = conn
 	return &b
 }
 
 // Codec接口，实现功能
 type Codec interface {
-	io.Closer
-	ReadHeader(header *Header) error
-	//不知道body是req还是resp，所以用interface传指针
-	ReadBody(body interface{}) error
-	Write(body interface{}, header *Header) error
+	Marshel(v any) ([]byte, error)
+	Unmarshal(data []byte) (any, error)
 }
 
 // 实现根据type初始化codec工厂函数
