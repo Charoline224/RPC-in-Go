@@ -8,7 +8,11 @@ import (
 
 const MaxMessageSize = 4 << 20
 
-type Framer struct{}
+type Framer struct {
+	ErrMessageTooLarge bool
+}
+
+var ErrMessageTooLarge = errors.New("message too large")
 
 func (Framer) EncodeMessage(data []byte) ([]byte, error) {
 	if len(data) > MaxMessageSize {
@@ -31,7 +35,7 @@ func (Framer) DecodeMessage(r io.Reader) ([]byte, error) {
 	}
 	length := binary.BigEndian.Uint32(prefix[1:5])
 	if length > MaxMessageSize {
-		return nil, errors.New("消息超长")
+		return nil, ErrMessageTooLarge
 	}
 	message := make([]byte, int(length))
 	if _, err := io.ReadFull(r, message); err != nil {
