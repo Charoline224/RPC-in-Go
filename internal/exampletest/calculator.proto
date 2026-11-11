@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package calculator;
+
+option go_package = "RPCinGo/internal/exampletest";
+
+message AddRequest {
+    int32 a = 1;
+    int32 b = 2;
+}
+
+message AddResponse {
+    int32 result = 1;
+}
+
+service Calculator {
+    rpc Add(AddRequest) returns (AddResponse);
+}

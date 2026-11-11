@@ -3,13 +3,17 @@ package main
 import (
 	"RPCinGo/Codec"
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
+
+	"google.golang.org/protobuf/proto"
 )
 
 type Service struct {
@@ -43,46 +47,73 @@ func NewServer() *Server {
 }
 
 // 应该注册service而不是method
-func (s *Server) Register(service interface{}) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	var srv Service
-	srv.Methods = make(map[string]Method)
+// 处理签名格式:func (c *Calculator) Add(
+//
+//	ctx context.Context,
+//	req *pb.AddRequest,
+//
+// ) (*pb.AddResponse, error)
+func (s *Server) Register(fullServiceName string, service interface{}) error {
+
 	t := reflect.TypeOf(service)
-	if t == nil || t.Kind() != reflect.Ptr {
-		s.err = errors.New("service must be a non-nil pointer")
-		return s.err
+	v := reflect.ValueOf(service)
+	if t == nil || t.Kind() != reflect.Ptr || t.Elem().Kind() != reflect.Struct {
+		return errors.New("service must be a non-nil pointer")
 	}
-	srv.typ = t
-	srv.Name = t.Elem().Name()
-	if srv.Name == "" {
-		s.err = errors.New("service must have a named type")
-		return s.err
+	if v.IsNil() {
+		return errors.New("service pointer cannot be nil")
 	}
-	_, ok := s.serviceMap[srv.Name]
-	if ok {
-		s.err = errors.New("repeat register")
-		return s.err
+	srv := Service{
+		typ:     t,
+		rcvr:    v,
+		Name:    fullServiceName,
+		Methods: make(map[string]Method),
 	}
-	srv.rcvr = reflect.ValueOf(service)
-	if srv.rcvr.IsNil() {
-		s.err = errors.New("service pointer cannot be nil")
-		return s.err
+	if srv.Name == "" || !strings.Contains(srv.Name, ".") {
+		return errors.New("invalid full service name")
 	}
+
+	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	errType := reflect.TypeOf((*error)(nil)).Elem()
+	protoType := reflect.TypeOf((*proto.Message)(nil)).Elem()
+
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
 		if method.Type.NumIn() != 3 ||
-			method.Type.NumOut() != 1 ||
-			method.Type.Out(0) != reflect.TypeOf((*error)(nil)).Elem() ||
+			method.Type.NumOut() != 2 ||
+
+			method.Type.In(1) != ctxType ||
+			method.Type.Out(1) != errType ||
+
+			method.Type.Out(0).Kind() != reflect.Ptr ||
 			method.Type.In(2).Kind() != reflect.Ptr {
 			continue
 		}
-		var m Method
-		m.Func = method.Func
-		m.ArgsType = method.Type.In(1)
-		m.ResType = method.Type.In(2)
-		srv.Methods[method.Name] = m
+		if method.Type.In(2).Elem().Kind() != reflect.Struct ||
+			method.Type.Out(0).Elem().Kind() != reflect.Struct {
+			continue
+		}
+		// 请求和响应必须实现 proto.Message
+		if !method.Type.In(2).Implements(protoType) ||
+			!method.Type.Out(0).Implements(protoType) {
+			continue
+		}
+		srv.Methods[method.Name] = Method{
+			Func:     method.Func,
+			ArgsType: method.Type.In(2),
+			ResType:  method.Type.Out(0),
+		}
 	}
+	if len(srv.Methods) == 0 {
+		return fmt.Errorf("service %s has no valid RPC methods", srv.Name)
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if _, exists := s.serviceMap[srv.Name]; exists {
+		return fmt.Errorf("service %s already registered", srv.Name)
+	}
+
 	s.serviceMap[srv.Name] = srv
 	return nil
 }
